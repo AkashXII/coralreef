@@ -1,0 +1,9 @@
+Case                                                       raw  prior  blend risk
+-------------------------------------------------------------------------------------
+LOW:  temp=18 dhw=0 ssta=0 turb=0.041 shelt=1 wind=1     0.306  0.000  0.183 Low
+LOW:  temp=26 dhw=0.5 ssta=0.2 turb=0.041 shelt=1 wind=10  0.350  0.029  0.222 Low
+MED:  temp=27 dhw=3 ssta=0.6 turb=0.08 shelt=1 wind=6    0.660  0.212  0.481 Moderate
+MED:  temp=28 dhw=5 ssta=1.0 turb=0.1 shelt=0 wind=4     0.746  0.383  0.601 Moderate
+HIGH: temp=29 dhw=8 ssta=1.5 turb=0.15 shelt=0 wind=3    0.914  0.587  0.783 High
+HIGH: temp=30 dhw=12 ssta=2.5 turb=0.2 shelt=0 wind=2    0.893  0.858  0.879 High
+NEG:  temp=25 dhw=0 ssta=-1.0 turb=0.03 shelt=1 wind=10  0.456  0.000  0.273 Low

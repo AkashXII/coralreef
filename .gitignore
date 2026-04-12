@@ -1,1 +1,14 @@
-dataset
+dataset/
+.env
+data/
+store/
+dip_op_example
+.ipynb_checkpoints/
+__pycache__/
+*.pyc
+node_modules/
+dist/
+tabular_data
+*.pkl
+*.pt
+models1/

@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 1
+names: ['coral']
+
+roboflow:
+  workspace: coral-detection-epsj2
+  project: coral_detection_model
+  version: 3
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/coral-detection-epsj2/coral_detection_model/dataset/3

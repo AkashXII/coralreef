@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+numpy
+opencv-python
+joblib
+ultralytics
+xgboost
+scikit-learn
+python-multipart
