@@ -4,13 +4,13 @@
 
 # Demo Video
 
-[Demo Video](https://www.loom.com/share/a26b1ef8fb954787a4dadb9dc3e67b7d)
+[Click Here](https://www.loom.com/share/a26b1ef8fb954787a4dadb9dc3e67b7d)
 
 ---
 
 ## Architecture
 
-![System Architecture](assests_test/Coralreefarchi.jpg)
+![System Architecture](assets_test/Coralreefarchi.jpg)
 
 ---
 
