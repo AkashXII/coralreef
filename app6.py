@@ -1,25 +1,3 @@
-"""
-app.py — Coral Bleaching Detection API
-FastAPI multimodal backend: CNN (image) + XGBoost (environmental data) + Groq (explanation)
-
-Run:
-    uvicorn app:app --reload --port 8000
-
-Requires .env file with:
-    GROQ_API_KEY=your_key_here
-
-Test (healthy coral, low stress):
-    curl -X POST http://localhost:8000/predict \
-      -F "image=@coral.jpg" \
-      -F "temperature=26" -F "dhw=0.5" -F "ssta=0.2" \
-      -F "turbidity=0.041" -F "sheltered=1" -F "windspeed=10"
-
-Test (bleaching conditions):
-    curl -X POST http://localhost:8000/predict \
-      -F "image=@coral.jpg" \
-      -F "temperature=30" -F "dhw=12" -F "ssta=2.5" \
-      -F "turbidity=0.15" -F "sheltered=0" -F "windspeed=2"
-"""
 
 from dotenv import load_dotenv
 load_dotenv()
