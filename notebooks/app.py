@@ -7,7 +7,7 @@ import matplotlib
 matplotlib.use("Agg")
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-GEMINI_API_KEY = "AIzaSyDe46O8faNSg034ca5u3iquN_M_wBfyQ_E"
+OPENROUTER_API_KEY = "your open router api key"
 
 val_transform = T.Compose([
     T.ToPILImage(), T.Resize((224, 224)),
@@ -111,22 +111,44 @@ Based on the image and these results, write a concise 3-4 sentence summary that:
 
 Keep the tone scientific but accessible. Do not use bullet points — write in plain paragraph form."""
 
-    payload = {
-        "contents": [{
-            "parts": [
-                {"text": prompt},
-                {"inline_data": {"mime_type": "image/jpeg", "data": img_b64}}
-            ]
-        }]
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json"
     }
 
-    url      = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-    response = requests.post(url, json=payload, timeout=30)
+    payload = {
+        "model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": prompt
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{img_b64}"
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+
+    response = requests.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers=headers,
+        json=payload,
+        timeout=60
+    )
 
     if response.status_code == 200:
-        return response.json()["candidates"][0]["content"]["parts"][0]["text"]
+        return response.json()["choices"][0]["message"]["content"]
     else:
-        return f"Gemini API error {response.status_code}: {response.text}"
+        return f"OpenRouter API error {response.status_code}: {response.text}"
+
 
 st.markdown("""
 <div class="hero">
@@ -143,7 +165,7 @@ if uploaded is None:
     → Upload any underwater coral image above<br>
     → The system will classify it as Healthy or Bleached<br>
     → GradCAM heatmap will show where the model is looking<br>
-    → Gemini AI will generate a plain-English summary of the results
+    → AI will generate a plain-English summary of the results
     </div>
     """, unsafe_allow_html=True)
 
@@ -234,19 +256,24 @@ if uploaded:
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown('<div class="section-title">GradCAM — Where the model is looking</div>', unsafe_allow_html=True)
+
     g1, g2, g3 = st.columns(3)
-    g1.image(orig,    caption="Original",        use_container_width=True, clamp=True)
-    g2.image(cam,     caption="GradCAM Heatmap", use_container_width=True, clamp=True)
-    g3.image(overlay, caption="Overlay",         use_container_width=True, clamp=True)
+    g1.image(orig, caption="Original", use_container_width=True, clamp=True)
+    g2.image(cam, caption="GradCAM Heatmap", use_container_width=True, clamp=True)
+    g3.image(overlay, caption="Overlay", use_container_width=True, clamp=True)
+
     st.markdown("""
     <div class="info-box">
     Red regions → where the model focuses most &nbsp;|&nbsp; 🔵 Blue regions → ignored areas<br>
     A good heatmap is centered on the coral body, not the water or background.
-    </div>""", unsafe_allow_html=True)
+    </div>
+    """, unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown('<div class="section-title">Spectral Feature Analysis</div>', unsafe_allow_html=True)
+
     f1, f2, f3 = st.columns(3)
+
     for col, name, val, tip in zip(
         [f1, f2, f3],
         ["ExG (Excess Green)", "rCBI (Red-Blue)", "NGRDI (Green-Red)"],
@@ -259,14 +286,28 @@ if uploaded:
                 <div class="metric-label">{name}</div>
                 <div class="metric-value">{val:.3f}</div>
                 <div style="font-family:'Space Mono',monospace;font-size:0.65rem;color:#6bbfb5;margin-top:0.4rem">{tip}</div>
-            </div>""", unsafe_allow_html=True)
+            </div>
+            """, unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown('<div class="section-title">AI Summary — Gemini Analysis</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">AI Summary</div>', unsafe_allow_html=True)
 
-    if GEMINI_API_KEY == "YOUR_GEMINI_API_KEY_HERE":
-        st.warning("Add your Gemini API key to the top of app.py to enable AI-generated summaries.")
+    if OPENROUTER_API_KEY == "YOUR_OPENROUTER_API_KEY":
+        st.warning("Add your OpenRouter API key to enable AI-generated summaries.")
     else:
         with st.spinner("Generating summary..."):
-            summary = gemini_summary(img_rgb, cnn_pred, cnn_conf, xgb_pred, fused_pred, exg, rcbi, ngrdi)
-        st.markdown(f'<div class="ai-box"><div class="ai-title">Gemini Summary</div>{summary}</div>', unsafe_allow_html=True)
+            summary = gemini_summary(
+                img_rgb,
+                cnn_pred,
+                cnn_conf,
+                xgb_pred,
+                fused_pred,
+                exg,
+                rcbi,
+                ngrdi
+            )
+
+        st.markdown(
+            f'<div class="ai-box"><div class="ai-title">AI Summary</div>{summary}</div>',
+            unsafe_allow_html=True
+        )
