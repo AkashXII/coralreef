@@ -5,9 +5,9 @@ matplotlib.use("Agg")
 from transformers import AutoImageProcessor, AutoModelForImageClassification
 from PIL import Image
 
-DEVICE         = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-GEMINI_API_KEY = "AIzaSyAKa7FBshpHOGgDlLpNe9ksmWvKfn4DOwg"
-MODEL_NAME = "./best_vit_model"
+DEVICE           = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+OPENROUTER_KEY   = "your openrouter key"
+MODEL_NAME       = "./best_vit_model"
 
 st.set_page_config(page_title="DeepReef AI", page_icon="🪸", layout="wide")
 st.markdown("""
@@ -53,44 +53,35 @@ def get_gradcam(model, pixel_values):
     model.eval()
     saved = {}
 
-    def fwd(m, i, o):
-        saved["acts"] = o.detach()
-
-    def bwd(m, gi, go):
-        saved["grads"] = go[0].detach()
+    def fwd(m, i, o):  saved["acts"]  = o.detach()
+    def bwd(m, gi, go): saved["grads"] = go[0].detach()
 
     h1 = model.vit.encoder.layer[-2].register_forward_hook(fwd)
     h2 = model.vit.encoder.layer[-2].register_full_backward_hook(bwd)
 
     model.zero_grad()
-    out = model(pixel_values=pixel_values)
-
+    out       = model(pixel_values=pixel_values)
     class_idx = out.logits.argmax(dim=-1).item()
-    score = out.logits[0, class_idx]
-    score.backward()
+    out.logits[0, class_idx].backward()
 
-    h1.remove()
-    h2.remove()
+    h1.remove(); h2.remove()
 
-    acts = saved["acts"][0, 1:].cpu()   # [n_patches, hidden]
-    grads = saved["grads"][0, 1:].cpu() # [n_patches, hidden]
-
-    weights = grads.mean(dim=0)         # [hidden]
-    cam = (acts * weights).sum(dim=-1)   # [n_patches]
-
-    cam = cam.numpy()
-    cam = np.maximum(cam, 0)
-    cam = (cam - cam.min()) / (cam.max() - cam.min() + 1e-8)
-
-    size = int(np.sqrt(len(cam)))
+    acts    = saved["acts"][0, 1:].cpu()
+    grads   = saved["grads"][0, 1:].cpu()
+    weights = grads.mean(dim=0)
+    cam     = (acts * weights).sum(dim=-1).numpy()
+    cam     = np.maximum(cam, 0)
+    cam     = (cam - cam.min()) / (cam.max() - cam.min() + 1e-8)
+    size    = int(np.sqrt(len(cam)))
     return cv2.resize(cam.reshape(size, size), (224, 224))
 
 
-def gemini_summary(img_rgb, vit_pred, vit_conf, xgb_pred, fused_pred,
-                   temp, turbidity, windspeed, tsi, ssta):
+def openrouter_summary(img_rgb, vit_pred, vit_conf, xgb_pred, fused_pred,
+                       temp, turbidity, windspeed, tsi, ssta):
     _, buf  = cv2.imencode(".jpg", cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR))
     img_b64 = base64.b64encode(buf).decode("utf-8")
-    prompt  = f"""You are a marine biology AI assistant analyzing a coral reef image.
+
+    prompt = f"""You are a marine biology AI assistant analyzing a coral reef image.
 
 Results:
 - ViT (NOAA pretrained): {"Bleached" if vit_pred==1 else "Healthy"} ({vit_conf*100:.1f}% confidence)
@@ -101,20 +92,36 @@ Environmental data: Temperature {temp}°C, Turbidity {turbidity}, Windspeed {win
 
 Write 3-4 sentences: state the diagnosis, reference environmental conditions, note if models agree, give an ecological observation. Plain paragraph, no bullet points."""
 
-    payload  = {"contents": [{"parts": [{"text": prompt}, {"inline_data": {"mime_type": "image/jpeg", "data": img_b64}}]}]}
     response = requests.post(
-        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}",
-        json=payload, timeout=30
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {OPENROUTER_KEY}",
+            "Content-Type": "application/json"
+        },
+        json={
+            "model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text",       "text": prompt},
+                        {"type": "image_url",  "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
+                    ]
+                }
+            ]
+        },
+        timeout=30
     )
+
     if response.status_code == 200:
-        return response.json()["candidates"][0]["content"]["parts"][0]["text"]
-    return f"Gemini error {response.status_code}: {response.text}"
+        return response.json()["choices"][0]["message"]["content"]
+    return f"OpenRouter error {response.status_code}: {response.text}"
 
 
 st.markdown("""
 <div class="hero">
     <h1>🪸 DeepReef AI</h1>
-    <p>NOAA ViT · XGBoost Environmental · Gemini Explainability</p>
+    <p>NOAA ViT · XGBoost Environmental · NVIDIA AI Explainability</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -138,7 +145,7 @@ if uploaded is None:
     → NOAA pretrained ViT classifies the image visually<br>
     → XGBoost uses the environmental values you entered<br>
     → Fusion combines both for the final prediction<br>
-    → Gemini AI generates a plain-English scientific summary
+    → NVIDIA AI generates a plain-English scientific summary
     </div>
     """, unsafe_allow_html=True)
 
@@ -151,7 +158,7 @@ if uploaded:
     try:
         processor, vit_model = load_model()
     except Exception as e:
-        st.error(f"Could not load NOAA model. Check internet connection. Error: {e}")
+        st.error(f"Could not load model. Error: {e}")
         st.stop()
 
     xgb_bundle   = load_xgb()
@@ -162,29 +169,25 @@ if uploaded:
         out   = vit_model(pixel_values=pixel_values)
         probs = torch.softmax(out.logits, dim=-1)[0]
 
-    label2id   = vit_model.config.label2id
-    bleach_id  = label2id.get("CORAL_BL", label2id.get("1", 1))
-    healthy_id = label2id.get("CORAL",    label2id.get("0", 0))
+    label2id  = vit_model.config.label2id
+    bleach_id = label2id.get("CORAL_BL", label2id.get("1", 1))
 
-    vit_prob  = probs[bleach_id].item()
-    vit_pred  = 1 if vit_prob > 0.5 else 0
-    vit_conf  = probs[vit_pred].item()
+    vit_prob = probs[bleach_id].item()
+    vit_pred = 1 if vit_prob > 0.5 else 0
+    vit_conf = probs[vit_pred].item()
 
     cam     = get_gradcam(vit_model, pixel_values)
     orig    = np.array(img_pil.resize((224, 224))).astype(np.float32) / 255.0
     heat    = cv2.cvtColor(cv2.applyColorMap(np.uint8(255*cam), cv2.COLORMAP_JET), cv2.COLOR_BGR2RGB) / 255.0
     overlay = np.clip(0.65*orig + 0.35*heat, 0, 1)
 
-    xgb_pred = 0
-    xgb_prob = 0.5
-    fused_pred = vit_pred
-    fused_prob = vit_prob
+    xgb_pred = 0; xgb_prob = 0.5; fused_pred = vit_pred; fused_prob = vit_prob
 
     if xgb_bundle:
-        xgb_prob  = xgb_bundle["model"].predict_proba([[temp, turbidity, windspeed, tsi, ssta]])[0][1]
-        xgb_pred  = 1 if xgb_prob > 0.5 else 0
-        fused_prob = 0.6 * vit_prob + 0.4 * xgb_prob
-        fused_pred = 1 if fused_prob > 0.5 else 0
+        xgb_prob   = xgb_bundle["model"].predict_proba([[temp, turbidity, windspeed, tsi, ssta]])[0][1]
+        xgb_pred   = 1 if xgb_prob > 0.5 else 0
+        fused_prob  = 0.6 * vit_prob + 0.4 * xgb_prob
+        fused_pred  = 1 if fused_prob > 0.5 else 0
 
     col_img, col_results = st.columns([1, 1], gap="large")
 
@@ -224,35 +227,22 @@ if uploaded:
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown('<div class="section-title">GradCAM — Where the ViT is looking</div>', unsafe_allow_html=True)
     g1, g2, g3 = st.columns(3)
-    g1.image(orig,    caption="Original",        use_container_width=True, clamp=True)
-    heatmap_vis = cv2.applyColorMap(
-    np.uint8(255 * cam),
-    cv2.COLORMAP_JET
-    )
-
-    heatmap_vis = cv2.cvtColor(
-        heatmap_vis,
-        cv2.COLOR_BGR2RGB
-    )
-
-    g2.image(
-        heatmap_vis,
-        caption="GradCAM Heatmap",
-        use_container_width=True
-    )
-    g3.image(overlay, caption="Overlay",         use_container_width=True, clamp=True)
+    g1.image(orig, caption="Original", use_container_width=True, clamp=True)
+    g2.image(cv2.cvtColor(cv2.applyColorMap(np.uint8(255*cam), cv2.COLORMAP_JET), cv2.COLOR_BGR2RGB),
+             caption="GradCAM Heatmap", use_container_width=True)
+    g3.image(overlay, caption="Overlay", use_container_width=True, clamp=True)
     st.markdown("""<div class="info-box">
     🔴 Red regions → where the ViT focuses most &nbsp;|&nbsp; 🔵 Blue regions → ignored<br>
     ViT works on 16×16 patches — heatmap shows which patches drove the prediction.
     </div>""", unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown('<div class="section-title">AI Summary — Gemini Analysis</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">AI Summary — NVIDIA Analysis</div>', unsafe_allow_html=True)
 
-    if GEMINI_API_KEY == "YOUR_GEMINI_API_KEY_HERE":
-        st.warning("Add your Gemini API key to the top of app.py to enable AI summaries.")
+    if OPENROUTER_KEY == "YOUR_OPENROUTER_API_KEY_HERE":
+        st.warning("Add your OpenRouter API key to the top of app.py to enable AI summaries.")
     else:
         with st.spinner("Generating summary..."):
-            summary = gemini_summary(img_rgb, vit_pred, vit_conf, xgb_pred, fused_pred,
-                                     temp, turbidity, windspeed, tsi, ssta)
-        st.markdown(f'<div class="ai-box"><div class="ai-title">🤖 Gemini Summary</div>{summary}</div>', unsafe_allow_html=True)
+            summary = openrouter_summary(img_rgb, vit_pred, vit_conf, xgb_pred, fused_pred,
+                                         temp, turbidity, windspeed, tsi, ssta)
+        st.markdown(f'<div class="ai-box"><div class="ai-title">🤖 NVIDIA AI Summary</div>{summary}</div>', unsafe_allow_html=True)
