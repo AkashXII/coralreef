@@ -25,7 +25,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-# ── Load models once at startup ───────────────────────────────────────────────
+
 cnn_model    = YOLO("models/best.pt")
 xgb_bundle   = joblib.load("xgboost_v2.pkl")
 xgb_model    = xgb_bundle["model"]
@@ -33,21 +33,11 @@ XGB_FEATURES = xgb_bundle["features"]
 groq_client  = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 
-# ── Physics-based prior ───────────────────────────────────────────────────────
-
 def physics_prior(temperature: float, dhw: float, ssta: float) -> float:
-    """
-    Scientifically grounded bleaching risk based on NOAA thresholds.
-    DHW > 8 = bleaching. Temp > 28C = thermal stress. SSTA > 1C = anomalous.
-    Monotonic by construction — ensures correct behaviour at extreme inputs.
-    """
     dhw_score  = np.clip(dhw / 16.0, 0.0, 1.0)
     temp_score = np.clip((temperature - 26.0) / 4.0, 0.0, 1.0)
     ssta_score = np.clip(ssta / 3.0, 0.0, 1.0)
     return float(0.40 * dhw_score + 0.35 * temp_score + 0.25 * ssta_score)
-
-
-# ── XGB inference ─────────────────────────────────────────────────────────────
 
 def get_xgb_prob(
     temperature: float,
@@ -57,12 +47,6 @@ def get_xgb_prob(
     sheltered: int,
     windspeed: float,
 ) -> float:
-    """
-    Blended environmental bleaching probability.
-    60% XGBoost learned signal + 40% physics prior.
-    Blend ensures monotonic and physically sensible outputs
-    in input ranges underrepresented in training data.
-    """
     ssta_p = max(0.0, ssta)
     ssta_n = max(0.0, -ssta)
 
@@ -84,8 +68,6 @@ def get_xgb_prob(
     return float(0.60 * xgb_raw + 0.40 * prior)
 
 
-# ── CNN inference ─────────────────────────────────────────────────────────────
-
 def get_cnn_prob(image_path: str) -> float:
     """Probability of bleaching from image. 0 = healthy, 1 = bleached."""
     result = cnn_model(image_path, verbose=False)
@@ -99,15 +81,10 @@ def get_cnn_prob(image_path: str) -> float:
     return float(probs[bleached_idx])
 
 
-# ── Fusion ────────────────────────────────────────────────────────────────────
-
 def fuse(cnn_prob: float, xgb_prob: float) -> float:
     """Fixed-weight fusion: CNN 65%, XGB 35%. CNN carries more weight
     because it has direct visual evidence of bleaching."""
     return 0.65 * cnn_prob + 0.35 * xgb_prob
-
-
-# ── Risk level ────────────────────────────────────────────────────────────────
 
 def get_risk(prob: float) -> str:
     if prob < 0.35:
@@ -117,9 +94,6 @@ def get_risk(prob: float) -> str:
     else:
         return "High"
 
-
-# ── Groq explanation ──────────────────────────────────────────────────────────
-
 def generate_explanation(
     prediction: str,
     risk: str,
@@ -127,13 +101,7 @@ def generate_explanation(
     xgb_prob: float | None,
     inputs: dict | None,
 ) -> str:
-    """
-    Builds a structured summary of the prediction signals and passes it
-    to Groq LLM to generate a clean, concise natural language explanation.
-    Falls back to a rule-based string if the API call fails.
-    """
 
-    # Image signal label
     if cnn_prob < 0.25:
         img_label = "visually healthy coral with normal pigmentation"
     elif cnn_prob < 0.45:
@@ -157,7 +125,6 @@ def generate_explanation(
     else:
         env_label = "high thermal stress"
 
-    # Stress drivers
     drivers = []
     if inputs and xgb_prob is not None and xgb_prob > 0.40:
         if inputs.get("dhw", 0) >= 8:
@@ -173,7 +140,6 @@ def generate_explanation(
 
     drivers_text = "; ".join(drivers) if drivers else "none identified"
 
-    # Signal agreement
     if xgb_prob is None:
         agreement = "image-only prediction, no environmental data"
     elif cnn_prob < 0.5 and xgb_prob < 0.5:
@@ -224,9 +190,6 @@ Rules:
             base += " We recommend continued monitoring and reporting to local reef authorities."
         return base
 
-
-# ── API endpoints ─────────────────────────────────────────────────────────────
-
 @app.get("/")
 def root():
     return {
@@ -254,7 +217,7 @@ async def predict(
     sheltered:   int   = Form(None),
     windspeed:   float = Form(None),
 ):
-    # Save uploaded image to temp file
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
         tmp.write(await image.read())
         tmp_path = tmp.name
@@ -262,14 +225,10 @@ async def predict(
     processed_path = tmp_path + "_clean.jpg"
 
     try:
-        # DIP preprocessing
-        dip_result = process_image(tmp_path)
+        dip_result = process_image(tmp_path)#our dip pipe
         cv2.imwrite(processed_path, dip_result["clean_bgr"])
-
-        # CNN inference
-        cnn_prob = get_cnn_prob(processed_path)
-
-        # XGB inference — only if all tabular inputs provided
+        cnn_prob = get_cnn_prob(processed_path) #cnn
+        #xgbost
         tabular_complete = all(
             v is not None
             for v in [temperature, dhw, ssta, turbidity, sheltered, windspeed]
@@ -294,7 +253,6 @@ async def predict(
         explanation = generate_explanation(prediction, risk, cnn_prob, xgb_prob, inputs)
 
     finally:
-        # Always clean up temp files
         for p in [tmp_path, processed_path]:
             try:
                 os.remove(p)

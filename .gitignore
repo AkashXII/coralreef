@@ -11,4 +11,5 @@ dist/
 tabular_data
 *.pkl
 *.pt
-models1/
+models1/.venv/
+.venv/
